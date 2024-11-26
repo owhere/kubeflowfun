@@ -1,0 +1,5 @@
+[control]
+control-node ansible_host=10.129.31.173 ansible_user=ubuntu
+[workers]
+worker-node1 ansible_host=10.129.31.135 ansible_user=ubuntu
+worker-node2 ansible_host=10.129.31.93 ansible_user=ubuntu
