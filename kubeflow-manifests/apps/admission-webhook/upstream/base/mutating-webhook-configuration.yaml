@@ -9,7 +9,8 @@ webhooks:
   clientConfig:
     caBundle: ""
     service:
-      name: service
+      name: admission-webhook-service     # Changed from 'service'
+      namespace: kubeflow                 # Add this line if it's missing
       path: /apply-poddefault
   sideEffects: None
   failurePolicy: Fail

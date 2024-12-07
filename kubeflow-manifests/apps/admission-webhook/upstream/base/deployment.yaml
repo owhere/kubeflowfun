@@ -2,9 +2,16 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: deployment
+  namespace: kubeflow
 spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: poddefaults
   template:
     metadata:
+      labels:
+        app: poddefaults
       annotations:
         sidecar.istio.io/inject: "false"
     spec:
@@ -12,7 +19,12 @@ spec:
       - image: docker.io/kubeflownotebookswg/poddefaults-webhook
         name: admission-webhook
         volumeMounts:
-        - mountPath: /etc/webhook/certs
+        - mountPath: /etc/webhook/certs/cert.pem
+          subPath: tls.crt
+          name: webhook-cert
+          readOnly: true
+        - mountPath: /etc/webhook/certs/key.pem
+          subPath: tls.key
           name: webhook-cert
           readOnly: true
         ports:
