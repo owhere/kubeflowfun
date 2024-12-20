@@ -167,61 +167,210 @@ cd kubespray
 ansible-playbook -i inventory/funkube/inventory.ini cluster.yml
 ```
 
-### Step 4: Apply Kubeflow Common Manifests
+### Step 4: Prepare the k8s cluster for Kubeflow
 
-- **Navigate to Manifests**:
+To prepare Kubeflow deployment, we prepare 
+- an echo server, to test out k8s API works properly
+- an ingress server, to test out web app traffic routing
+- a matrix server, to monitor the cluster load
+- a storage class, to dynamically provision and manage storage resources
 
-  ```bash
-  cd kubeflow-manifests/common
-  ```
-
-- **Apply Manifests**:
-
-  ```bash
-  kubectl apply -k .
-  ```
-
-### Step 5: Apply Kubeflow Application Manifests
-
-- **Navigate to Apps**:
-
-  ```bash
-  cd ../apps
-  ```
-
-- **Apply Manifests**:
-
-  ```bash
-  kubectl apply -k .
-  ```
-
-## Additional Components
+**Note: alias k=kubectl**
 
 - **Deploy Echo Server**:
 
-  ```bash
-  cd helm/echo-server
-  helm install echo-server .
-  ```
+```bash
+cd helm/echo-server
+helm install echo-server .
+```
 
 - **Set Up Ingress**:
-
-  ```bash
-  cd helm
-  ./ingress.sh
-  ```
+```bash
+cd helm
+./ingress.sh
+```
 
 - **Deploy Matrix Component**:
-
-  ```bash
-  ./matrix.sh
-  ```
+```bash
+cd helm
+./matrix.sh
+k top nodes
+k top pods
+```
 
 - **Configure Storage**:
+```bash
+k apply -f storage.yaml
+```
 
-  ```bash
-  kubectl apply -f storage.yaml
-  ```
+### Step 5: Apply Kubeflow Common Manifests
+
+- **Install kubeflow namespace**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k kubeflow-namespace/base
+``` 
+
+- **Install kubeflow roles**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k kubeflow-roles/base
+``` 
+
+- **Install cert-manager**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k cert-manger/base
+k apply -k kubeflow-issuer/base
+k get pods -n cert-manager
+k get apiservices | grep cert-manager
+```
+
+- **Test cert-manager**:
+
+```bash
+cd kubeflow-manifests/tests/
+cd cert-manager/
+k apply -f self-signed-issuer.yaml 
+k apply -f test-certificate.yaml 
+k describe certificate test-certificate -n default
+k get secret test-certificate-secret -n default
+```
+
+- **Install Istio**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k istio-1-23/istio-crds/base/
+k apply -k istio-1-23/istio-namespace/base
+k apply -k istio-1-23/istio-install/overlays/oauth2-proxy/
+k apply -k istio-1-23/kubeflow-istio-resources/base
+k wait --for=condition=Ready pods --all -n istio-system --timeout 300s
+k get pods -n istio-system
+k get svc -n istio-system
+```
+
+- **Test Istio**:
+
+Follow this file: [Istio test](kubeflow-manifests/tests/istio/test.sh)
+
+Also check out the resources
+
+```bash
+k get all -n istio-system
+k get all -n kubeflow
+k get gateway -n istio-system
+k get clusterroles | grep kubeflow-istio
+k get virtualservice -A
+k get pods -n istio-system
+```
+
+- **Install oauth2-proxy**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k oauth2-proxy/overlays/m2m-dex-and-kind/
+k wait --for=condition=ready pod -l 'app.kubernetes.io/name=oauth2-proxy' --timeout=180s -n oauth2-proxy
+k wait --for=condition=ready pod -l 'app.kubernetes.io/name=cluster-jwks-proxy' --timeout=180s -n istio-system
+k get all -n oauth2-proxy
+```
+
+- **Install dex**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k dex/overlays/oauth2-proxy/
+k wait --for=condition=ready pods --all --timeout=180s -n auth
+```
+
+- **Install networkpolicies**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k networkpolicies/base
+k get networkpolicy -A
+k describe networkpolicy jupyter-web-app -n kubeflow
+```
+
+- **Install kubeflow roles**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k kubeflow-roles/base
+```
+
+- **Install user namespace**:
+
+```bash
+cd kubeflow-manifests/common/
+k apply -k user-namespace/base
+```
+
+
+### Step 6: Apply Kubeflow Application Manifests
+
+- **CentralDashboard and Jupyter web app**:
+
+```bash
+cd kubeflow-manifests/apps/
+k apply -k centraldashboard/upstream/base
+k apply -k centraldashboard/overlays/oauth2-proxy/
+k apply -k jupyter/notebook-controller/upstream/overlays/kubeflow/
+k apply -k jupyter/jupyter-web-app/upstream/overlays/istio/
+```
+
+- **Profiles**:
+
+```bash
+cd kubeflow-manifests/apps/
+k apply -k profiles/upstream/default/
+k apply -k profiles/upstream/overlays/kubeflow/
+```
+
+- **Admission-webhook**
+```bash
+k apply -k apps/admission-webhook/upstream/base/
+k apply -k apps/admission-webhook/upstream/overlays/
+k apply -k apps/admission-webhook/upstream/overlays/cert-manager/
+k get secret webhook-certs -n kubeflow
+k describe validatingwebhookconfiguration -A
+```
+
+- **Cinder CSI Plugin Fix: authenticate with clouds.yaml as clouds.conf not working**
+Changes made here: [Cloud Provider OpenStack Repo](https://github.com/kubernetes/cloud-provider-openstack/compare/master...owhere:cloud-provider-openstack:clouds-auth)
+
+```bash
+cd cloud-provider-openstack/manifests/cinder-csi-plugin
+k apply -f cinder-csi-controllerplugin.yaml 
+k apply -f cinder-csi-nodeplugin.yaml 
+k apply -f csi-cinder-driver.yaml 
+k apply -f csi-secret-cinderplugin.yaml 
+k apply -f cinder-csi-nodeplugin-rbac.yaml 
+k apply -f cinder-csi-controllerplugin-rbac.yaml 
+k get secret cloud-config -n kube-system
+```
+
+- **PVC viewer (volumes)**
+```bash
+cd kubeflow-manifests/apps/
+k apply -k apps/pvcviewer-controller/upstream/base
+k apply -k apps/pvcviewer-controller/upstream/default/
+```
+
+## Last Fun
+
+- **Drain a node to update the kernel**
+
+- **Add a new node to the cluster using Kubespray**
+
+- **Run a DNS test**
+
+- **Patch a certificationi** 
+
+
 
 ## License
 
