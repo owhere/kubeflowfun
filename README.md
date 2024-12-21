@@ -1,22 +1,12 @@
 # Deploying Kubeflow on OpenStack Cloud
 
-Kubeflow is fun, is it really!?
+Kubeflow is fun.
 
-No, deploying Kubeflow could be challenging because it has many components and the built-in and third-party dependencies, for example, how to make sure a Jupyter Notebook run with proper amount of storage created for the run, which is not only the configuration in kubeflow, but also in kubernetes and in underlying infrastructure, in this case, OpenStack.
-
-This repository provides a comprehensive guide and necessary configurations to deploy **Kubeflow** on a **Kubernetes (k8s)** cluster within an **OpenStack** cloud platform. The deployment process leverages tools like **Ansible**, **Kubespray**, **Kubeflow Manifest** to automate and streamline the setup.
-
-The following repositories and resources were used for this deployment:
-
-- [Kubeflow](https://github.com/kubeflow/kubeflow): The primary repository for Kubeflow, a machine learning toolkit for Kubernetes.
-- [Kubespray](https://github.com/kubernetes-sigs/kubespray): A collection of Ansible playbooks for provisioning and managing Kubernetes clusters.
-- [cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack): Repository for OpenStack cloud provider integrations with Kubernetes.
-- [Helm](https://github.com/helm/helm): The Kubernetes package manager used for deploying additional components.
-- [Kubeflow Manifests](https://github.com/kubeflow/manifests): The repository containing manifests for deploying and managing Kubeflow components.
-
+However, deploying Kubeflow could be challenging because it has many components, the built-in and the third-party dependencies. 
 
 ## Table of Contents
 
+- [Dependencies] (#dependencies)
 - [Overview](#overview)
 - [Folder Structure](#folder-structure)
 - [Prerequisites](#prerequisites)
@@ -32,7 +22,7 @@ The following repositories and resources were used for this deployment:
 
 ## Overview
 
-This repository is designed to facilitate the deployment of Kubeflow on a Kubernetes cluster hosted on an OpenStack cloud platform. The deployment process includes the following tasks:
+This repository provides a comprehensive guide and necessary configurations to deploy **Kubeflow** on a **Kubernetes (k8s)** cluster within an **OpenStack** cloud platform. The deployment process leverages tools like **Ansible**, **Kubespray**, **Kubeflow Manifest** to automate and streamline the setup. The deployment process includes the following tasks:
 
 0. **Prepare a bastion node**: Set up a control node where Kubespray will be executed to deploy Kubernetes.
 1. **Create OpenStack instances**: Provision three instances—one for the control plane and two for worker nodes.
@@ -40,6 +30,14 @@ This repository is designed to facilitate the deployment of Kubeflow on a Kubern
 3. **Deploy Kubernetes with Kubespray**: Use Kubespray to set up a Kubernetes cluster on the prepared nodes.
 4. **Apply Kubeflow common manifests**: Deploy common Kubeflow components.
 5. **Apply Kubeflow application manifests**: Deploy Kubeflow applications like Notebooks.
+
+The following repositories and resources were used for this deployment:
+
+- [Kubeflow](https://github.com/kubeflow/kubeflow): The primary repository for Kubeflow, a machine learning toolkit for Kubernetes.
+- [Kubespray](https://github.com/kubernetes-sigs/kubespray): A collection of Ansible playbooks for provisioning and managing Kubernetes clusters.
+- [cloud-provider-openstack](https://github.com/kubernetes/cloud-provider-openstack): Repository for OpenStack cloud provider integrations with Kubernetes.
+- [Helm](https://github.com/helm/helm): The Kubernetes package manager used for deploying additional components.
+- [Kubeflow Manifests](https://github.com/kubeflow/manifests): The repository containing manifests for deploying and managing Kubeflow components.
 
 ## Folder Structure
 
@@ -309,15 +307,20 @@ cd kubeflow-manifests/common/
 k apply -k user-namespace/base
 ```
 
-
 ### Step 6: Apply Kubeflow Application Manifests
 
-- **CentralDashboard and Jupyter web app**:
+- **CentralDashboard**:
 
 ```bash
 cd kubeflow-manifests/apps/
 k apply -k centraldashboard/upstream/base
 k apply -k centraldashboard/overlays/oauth2-proxy/
+```
+
+ **Jupyter web app**:
+
+```bash
+cd kubeflow-manifests/apps/
 k apply -k jupyter/notebook-controller/upstream/overlays/kubeflow/
 k apply -k jupyter/jupyter-web-app/upstream/overlays/istio/
 ```
@@ -332,15 +335,14 @@ k apply -k profiles/upstream/overlays/kubeflow/
 
 - **Admission-webhook**
 ```bash
-k apply -k apps/admission-webhook/upstream/base/
-k apply -k apps/admission-webhook/upstream/overlays/
-k apply -k apps/admission-webhook/upstream/overlays/cert-manager/
+cd kubeflow-manifests/apps/
+k apply -k admission-webhook/upstream/overlays/
+k apply -k admission-webhook/upstream/overlays/cert-manager/
 k get secret webhook-certs -n kubeflow
 k describe validatingwebhookconfiguration -A
 ```
 
-- **Cinder CSI Plugin Fix: authenticate with clouds.yaml as clouds.conf not working**
-Changes made here: [Cloud Provider OpenStack Repo](https://github.com/kubernetes/cloud-provider-openstack/compare/master...owhere:cloud-provider-openstack:clouds-auth)
+- **Cinder CSI Plugin**
 
 ```bash
 cd cloud-provider-openstack/manifests/cinder-csi-plugin
@@ -353,24 +355,53 @@ k apply -f cinder-csi-controllerplugin-rbac.yaml
 k get secret cloud-config -n kube-system
 ```
 
-- **PVC viewer (volumes)**
+- **Cinder CSI Plugin Fix**
+
+Update authenticate with clouds.yaml as clouds.conf not working
+
+Changes made here: [Cloud Provider OpenStack Repo](https://github.com/kubernetes/cloud-provider-openstack/compare/master...owhere:cloud-provider-openstack:clouds-auth)
+
 ```bash
-cd kubeflow-manifests/apps/
-k apply -k apps/pvcviewer-controller/upstream/base
-k apply -k apps/pvcviewer-controller/upstream/default/
+cd cloud-provider-openstack/manifests/cinder-csi-plugin
+k apply -f cinder-csi-controllerplugin.yaml 
+k get svc -n kubeflow
+k delete secret cloud-config -n kube-system
+k create secret generic cloud-config -n kube-system   --from-file=cloud.conf=/path/to/cloud.conf   --from-file=clouds.yaml=/path/to/clouds.yaml
+k get secret cloud-config -n kube-system -o yaml
+k rollout restart deployment csi-cinder-controllerplugin -n kube-systemc
 ```
 
-## Last Fun
+- **PVC viewer (volumes)**
+
+```bash
+cd kubeflow-manifests/apps
+k apply -k pvcviewer-controller/upstream/base
+k apply -k pvcviewer-controller/upstream/default/
+k apply -k apps/volumes-web-app/upstream/overlays/istio/
+```
+
+- **Test volume**
+
+```bash
+cd kubeflow-manifests/tests
+k apply -f test-pvc.yaml
+k get pvc test-pvc
+k get pod test-pod
+k exec -it test-pod -- cat /data/testfile
+```
+
+- **Tensorboard**
+```bash
+cd kubeflow-manifests/apps
+k apply -k tensorboard/tensorboard-controller/upstream/overlays/kubeflow/
+k apply -k apps/tensorboard/tensorboards-web-app/upstream/overlays/istio/
+```
+
+## More Fun
 
 - **Drain a node to update the kernel**
-
 - **Add a new node to the cluster using Kubespray**
-
 - **Run a DNS test**
-
-- **Patch a certificationi** 
-
-
 
 ## License
 
