@@ -6,7 +6,6 @@ However, deploying Kubeflow could be challenging because it has many components,
 
 ## Table of Contents
 
-- [Dependencies] (#dependencies)
 - [Overview](#overview)
 - [Folder Structure](#folder-structure)
 - [Prerequisites](#prerequisites)
